@@ -21,6 +21,7 @@
 //   missingEmailConfigKeys()       -> string[]  (KEY NAMES only, never values)
 //   verifyEmailConfig()            -> void      (one-line startup status log)
 //   sendContactEmail(payload)      -> { sent, error? }   -- never throws
+//   sendBookingEmail(lead)         -> { sent, errorCode? } -- never throws
 //
 // Nothing here opens a socket until the first send (lazy transporter), and the
 // transporter is pooled + time-limited so a dead SMTP server can never hold a
@@ -259,6 +260,152 @@ function buildContactEmail(payload = {}, { config = emailConfig(), now = new Dat
 }
 
 // ---------------------------------------------------------------------------
+// Booking inquiry email (new tracking flow)
+// ---------------------------------------------------------------------------
+
+// Header-safe booking subject. Same guard as buildSubject: validation already
+// stripped controls, but the builder may also be called with a raw DB row.
+function buildBookingSubject({ name }) {
+  const safeName = String(name || '').replace(/[\r\n]+/g, ' ').trim();
+  return `Booking Inquiry — ${safeName}`;
+}
+
+// Builds { from, to, replyTo, subject, text, html }. Pure.
+// Includes the structured stay details the owner needs to answer without
+// opening the admin dashboard. Every value that reaches HTML is escaped.
+function buildBookingEmail(lead = {}, { config = emailConfig() } = {}) {
+  const name = String(lead.name || '').trim();
+  const email = String(lead.email || '').trim();
+  const phone = lead.phone ? String(lead.phone).trim() : '';
+  const checkIn = String(lead.check_in || '').trim();
+  const checkOut = String(lead.check_out || '').trim();
+  const guests = lead.guests === undefined || lead.guests === null ? '' : String(lead.guests);
+  const room = lead.room_slug ? String(lead.room_slug).trim() : '';
+  const sourcePage = lead.source_page ? String(lead.source_page).trim() : '';
+  const message = String(lead.message || '');
+
+  const subject = buildBookingSubject({ name });
+
+  // ---- plain text -------------------------------------------------------
+  const textLines = [
+    'Booking inquiry from the Puri Sunny website.',
+    '',
+    `Nama       : ${name}`,
+    `Email      : ${email || '-'}`,
+    `Telepon    : ${phone || '-'}`,
+    `Check-in   : ${checkIn}`,
+    `Check-out  : ${checkOut}`,
+    `Tamu       : ${guests}`,
+    `Kamar      : ${room || '-'}`,
+    `Halaman    : ${sourcePage || '-'}`,
+    '',
+    'Pesan:',
+    '----------------------------------------',
+    message,
+    '----------------------------------------',
+    '',
+    'Balas email ini untuk menjawab langsung ke tamu.',
+  ];
+  const text = textLines.join('\n');
+
+  // ---- HTML -------------------------------------------------------------
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone);
+  const safeCheckIn = escapeHtml(checkIn);
+  const safeCheckOut = escapeHtml(checkOut);
+  const safeGuests = escapeHtml(guests);
+  const safeRoom = escapeHtml(room || '-');
+  const safeSourcePage = escapeHtml(sourcePage || '-');
+  const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+
+  const phoneRow = phone
+    ? `
+          <tr>
+            <td style="padding:4px 12px 4px 0;color:#6b7280;">Telepon</td>
+            <td style="padding:4px 0;">${safePhone}</td>
+          </tr>`
+    : '';
+  const emailRow = email
+    ? `<a href="mailto:${safeEmail}" style="color:#166534;text-decoration:none;">${safeEmail}</a>`
+    : '-';
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:24px;background:#f5f3ee;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e1d8;border-radius:6px;">
+    <tr>
+      <td style="padding:20px 24px;background:#166534;color:#ffffff;border-radius:6px 6px 0 0;">
+        <strong style="font-size:16px;">Booking inquiry</strong><br>
+        <span style="font-size:12px;opacity:.85;">Puri Sunny &mdash; purisunnymunduk.id</span>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:20px 24px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.6;">
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Nama</td>
+          <td style="padding:4px 0;">${safeName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Email</td>
+          <td style="padding:4px 0;">${emailRow}</td>
+        </tr>${phoneRow}
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Check-in</td>
+          <td style="padding:4px 0;">${safeCheckIn}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Check-out</td>
+          <td style="padding:4px 0;">${safeCheckOut}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Tamu</td>
+          <td style="padding:4px 0;">${safeGuests}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Kamar</td>
+          <td style="padding:4px 0;">${safeRoom}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;">Halaman</td>
+          <td style="padding:4px 0;">${safeSourcePage}</td>
+        </tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:0 24px 20px;">
+        <div style="border-top:1px solid #e5e1d8;padding-top:16px;font-size:14px;line-height:1.7;white-space:normal;">${safeMessage}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:14px 24px;background:#f9f8f4;border-top:1px solid #e5e1d8;font-size:12px;color:#6b7280;border-radius:0 0 6px 6px;">
+        Balas email ini untuk menjawab langsung ke tamu.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const fromAddress = `"${config.fromName.replace(/["\\]/g, '')}" <${config.from}>`;
+
+  return {
+    from: fromAddress,
+    to: config.to,
+    replyTo: email || undefined,
+    subject,
+    text,
+    html,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Transporter (lazy, pooled, time-limited)
 // ---------------------------------------------------------------------------
 
@@ -343,7 +490,44 @@ function createMailer({ transportFactory = defaultTransportFactory, now = () => 
     }
   }
 
-  return { sendContactEmail, resetTransport, getTransport };
+  /**
+   * Send one booking-inquiry email to EMAIL_TO.
+   * Never throws; resolves { sent: true } or { sent: false, errorCode }.
+   * `errorCode` is the raw nodemailer code; the booking service whitelists it
+   * before anything reaches the database. No error message is returned.
+   */
+  async function sendBookingEmail(lead) {
+    const missing = missingEmailConfigKeys();
+    if (missing.length > 0) {
+      return { sent: false, errorCode: 'UNKNOWN' };
+    }
+
+    let mail;
+    try {
+      getTransport(); // pins the config snapshot used for rendering
+      mail = buildBookingEmail(lead, { config: transportConfig });
+    } catch (err) {
+      return { sent: false, errorCode: err && err.code ? String(err.code) : 'UNKNOWN' };
+    }
+
+    try {
+      const info = await getTransport().sendMail(mail);
+      // Rejected recipients arrive without throwing on some transports.
+      const rejected = info && Array.isArray(info.rejected) ? info.rejected : [];
+      const accepted = info && Array.isArray(info.accepted) ? info.accepted : [];
+      if (rejected.includes(mail.to) && !accepted.includes(mail.to)) {
+        return { sent: false, errorCode: 'EENVELOPE' };
+      }
+      return { sent: true };
+    } catch (err) {
+      // Server-side log only, and only the code: never the SMTP message (it can
+      // contain hostnames, credentials hints and recipient addresses).
+      console.error('Booking email send failed:', err && err.code ? String(err.code) : 'UNKNOWN');
+      return { sent: false, errorCode: err && err.code ? String(err.code) : 'UNKNOWN' };
+    }
+  }
+
+  return { sendContactEmail, sendBookingEmail, resetTransport, getTransport };
 }
 
 // Module-level singleton used by routes/contact.js and scripts/send-test-email.js.
@@ -365,7 +549,10 @@ module.exports = {
   buildSubject,
   phoneToWhatsApp,
   buildContactEmail,
+  buildBookingSubject,
+  buildBookingEmail,
   createMailer,
   sendContactEmail: mailer.sendContactEmail,
+  sendBookingEmail: mailer.sendBookingEmail,
   resetTransport: mailer.resetTransport,
 };

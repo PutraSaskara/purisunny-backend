@@ -9,5 +9,6 @@ router.use('/contact', require('./contact'));
 router.use('/contacts', require('./contact'));
 router.use('/seo', require('./seo'));
 router.use('/redirects', require('./redirects'));
+router.use('/booking', require('./booking'));
 
 module.exports = router;

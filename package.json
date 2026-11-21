@@ -24,10 +24,13 @@
     "migrate:article-faq": "node database/migrate-article-faq.js",
     "migrate:keywords": "node database/migrate-keywords.js",
     "migrate:agent-foundation": "node database/migrate-agent-foundation.js",
+    "migrate:booking": "node database/migrate-booking.js",
+    "migrate:booking-question": "node database/migrate-booking-question.js",
     "agent:key:create": "node scripts/agent-key.js create",
     "agent:key:list": "node scripts/agent-key.js list",
     "agent:key:revoke": "node scripts/agent-key.js revoke",
-    "agent:purge": "node scripts/agent-purge.js"
+    "agent:purge": "node scripts/agent-purge.js",
+    "booking:purge": "node scripts/purge-booking-data.js"
   },
   "keywords": [],
   "author": "",

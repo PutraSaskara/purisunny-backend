@@ -26,6 +26,11 @@ require('dotenv').config(fs.existsSync(testEnvPath) ? { path: testEnvPath } : un
 
 const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
+const {
+  bookingLeadsDDL,
+  bookingEventsDDL,
+  bookingQuestionMigrationDDL,
+} = require('../database/ddl-booking');
 
 const DB_NAME = process.env.DB_NAME || '';
 if (!/test|verify|scratch/i.test(DB_NAME)) {
@@ -69,6 +74,17 @@ async function main() {
     .replace(/^USE purisunny;/m, `USE \`${DB_NAME}\`;`);
   await db.query(schema);
   console.log(`  + schema imported into ${DB_NAME}`);
+
+  // Booking tables come from schema.sql too; running the shared DDL here keeps
+  // the scratch database byte-identical even if schema.sql is reordered.
+  await db.query(bookingLeadsDDL);
+  await db.query(bookingEventsDDL);
+  // CREATE TABLE IF NOT EXISTS does not change a pre-existing scratch table, so
+  // apply the question-channel shape explicitly. Each ALTER is idempotent.
+  for (const ddl of bookingQuestionMigrationDDL) {
+    await db.query(ddl);
+  }
+  console.log('  + booking tables verified (booking_leads, booking_events)');
 
   // Test users.
   for (const user of TEST_USERS) {
